@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using Bicep.Core.Diagnostics;
 using Bicep.Core.UnitTests;
@@ -341,6 +342,97 @@ param bar = getSecret(subId, rgName, kvName, secretName)
     }
 
     [TestMethod]
+    public void All_getSecret_forms_emit_keyVault_references()
+    {
+        var parametersResult = CompilationHelper.CompileParams(
+            ("parameters.bicepparam", """
+using none
+
+param fromGetSecret = getSecret('subId', 'rgName', 'kvName', 'secretName', 'secretVersion')
+param fromAzGetSecret = az.getSecret('subId', 'rgName', 'kvName', 'secretName', 'secretVersion')
+param fromGetSecretWithoutVersion = getSecret('subId', 'rgName', 'kvName', 'secretName')
+param fromAzGetSecretWithoutVersion = az.getSecret('subId', 'rgName', 'kvName', 'secretName')
+"""));
+
+        var templateResult = CompilationHelper.Compile(
+            ("main.bicep", """
+resource kv 'Microsoft.KeyVault/vaults@2019-09-01' existing = {
+  name: 'kvName'
+}
+
+module secret 'secret.bicep' = {
+  name: 'secret'
+  params: {
+    fromResourceGetSecret: kv.getSecret('secretName', 'secretVersion')
+    fromResourceGetSecretWithoutVersion: kv.getSecret('secretName')
+  }
+}
+"""),
+            ("secret.bicep", """
+@secure()
+param fromResourceGetSecret string
+
+@secure()
+param fromResourceGetSecretWithoutVersion string
+"""));
+
+        using (new AssertionScope())
+        {
+            parametersResult.Should().NotHaveAnyDiagnostics();
+            templateResult.Should().NotHaveAnyDiagnostics();
+        }
+
+        var parameters = TemplateHelper.ConvertAndAssertParameters(parametersResult.Parameters);
+
+        AssertGetSecretForms(parameters, templateResult.Template, "fromGetSecret", "fromAzGetSecret", "fromResourceGetSecret", "secretVersion");
+        AssertGetSecretForms(parameters, templateResult.Template, "fromGetSecretWithoutVersion", "fromAzGetSecretWithoutVersion", "fromResourceGetSecretWithoutVersion", null);
+    }
+
+    private static void AssertGetSecretForms(
+        ImmutableDictionary<string, TemplateHelper.ParameterProperties> parameters,
+        JToken? template,
+        string getSecretParameterName,
+        string azGetSecretParameterName,
+        string resourceGetSecretParameterName,
+        string? expectedSecretVersion)
+    {
+        var getSecretReference = parameters[getSecretParameterName].Reference;
+        var azGetSecretReference = parameters[azGetSecretParameterName].Reference;
+        var resourceGetSecretParameter = template!.SelectToken($"$.resources[?(@.name == 'secret')].properties.parameters.{resourceGetSecretParameterName}")!;
+        var resourceGetSecretReference = resourceGetSecretParameter.SelectToken("$.reference");
+
+        using (new AssertionScope())
+        {
+            parameters[getSecretParameterName].Value.Should().BeNull();
+            parameters[azGetSecretParameterName].Value.Should().BeNull();
+            resourceGetSecretParameter.SelectToken("$.value").Should().BeNull();
+
+            getSecretReference.Should().NotBeNull();
+            azGetSecretReference.Should().NotBeNull();
+            getSecretReference!.Should().DeepEqual(azGetSecretReference!);
+
+            AssertKeyVaultReference(getSecretReference, "secretName", expectedSecretVersion);
+            AssertKeyVaultReference(azGetSecretReference, "secretName", expectedSecretVersion);
+            AssertKeyVaultReference(resourceGetSecretReference, "secretName", expectedSecretVersion);
+        }
+    }
+
+    private static void AssertKeyVaultReference(JToken? reference, string expectedSecretName, string? expectedSecretVersion)
+    {
+        reference.Should().NotBeNull();
+        reference!.SelectToken("$.keyVault.id").Should().NotBeNull();
+        reference.SelectToken("$.secretName")!.Should().DeepEqual(expectedSecretName);
+        if (expectedSecretVersion is null)
+        {
+            reference.SelectToken("$.secretVersion").Should().BeNull();
+        }
+        else
+        {
+            reference.SelectToken("$.secretVersion")!.Should().DeepEqual(expectedSecretVersion);
+        }
+    }
+
+    [TestMethod]
     public void ExternalInput_without_config_compiles_successfully()
     {
         var result = CompilationHelper.CompileParams(
@@ -493,7 +585,7 @@ param bar2 = externalInput('kind', foo)
     }
 
     [TestMethod]
-    public void ExternalInput_parameter_with_unevaluable_imported_variable_references_returns_diagnostic()
+    public void ExternalInput_parameter_with_non_pure_imported_variable_references_returns_diagnostic()
     {
         var result = CompilationHelper.CompileParams(
             ("parameters.bicepparam", @"
@@ -505,10 +597,37 @@ param bar2 = externalInput('kind', foo)
     @export()
     var foo = resourceGroup().location // cannot be evaluated in bicepparam file
     "));
-        result.Should().OnlyContainDiagnostic(
-            "BCP338",
-            DiagnosticLevel.Error,
-            "Failed to evaluate parameter \"foo2\": Failed to evaluate variable \"foo\": The template function 'RESOURCEGROUP' is not expected at this location. Please see https://aka.ms/arm-functions for usage details.");
+        result.Should().HaveDiagnostics(
+            [
+                ("BCP104", DiagnosticLevel.Error, "The referenced module has errors."),
+                ("BCP063", DiagnosticLevel.Error, "The name \"foo\" is not a parameter, variable, resource or module."),
+            ]);
+    }
+
+    [TestMethod]
+    public void Parameter_assignment_with_imported_resource_id_variable_returns_referenced_module_diagnostic()
+    {
+        var result = CompilationHelper.CompileParams(
+            ("main.bicep", """
+                param subnetId string
+                """),
+            ("parameters.bicepparam", """
+                using 'main.bicep'
+
+                import { defaultSubnetId } from 'variables.bicep'
+
+                param subnetId = defaultSubnetId
+                """),
+            ("variables.bicep", """
+                @export()
+                var defaultSubnetId = resourceId('resourceGroup', 'Microsoft.Network/virtualNetworks/subnets', 'vnet', 'subnet')
+                """));
+
+        result.Should().HaveDiagnostics(
+            [
+                ("BCP104", DiagnosticLevel.Error, "The referenced module has errors."),
+                ("BCP063", DiagnosticLevel.Error, "The name \"defaultSubnetId\" is not a parameter, variable, resource or module."),
+            ]);
     }
 
     [TestMethod]
@@ -539,7 +658,7 @@ param bar2 = externalInput('kind', foo)
     }
 
     [TestMethod]
-    public void ExternalInput_parameter_with_unevaluable_imported_function_returns_diagnostics()
+    public void ExternalInput_parameter_with_non_pure_imported_function_returns_diagnostics()
     {
         var result = CompilationHelper.CompileParams(
             ("parameters.bicepparam", @"
@@ -551,10 +670,11 @@ param bar2 = externalInput('kind', foo)
     @export()
     func foo() string => resourceGroup().location // cannot be evaluated in bicepparam file
     "));
-        result.Should().OnlyContainDiagnostic(
-            "BCP338",
-            DiagnosticLevel.Error,
-            "Failed to evaluate parameter \"foo2\": The template function 'RESOURCEGROUP' is not expected at this location. Please see https://aka.ms/arm-functions for usage details.");
+        result.Should().HaveDiagnostics(
+            [
+                ("BCP104", DiagnosticLevel.Error, "The referenced module has errors."),
+                ("BCP059", DiagnosticLevel.Error, "The name \"foo\" is not a function."),
+            ]);
     }
 
     [TestMethod]
