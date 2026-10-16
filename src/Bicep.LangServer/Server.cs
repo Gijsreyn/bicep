@@ -84,6 +84,7 @@ namespace Bicep.LanguageServer
                     .WithHandler<BicepBuildParamsCommandHandler>()
                     .WithHandler<BicepCreateConfigFileHandler>()
                     .WithHandler<BicepGetRecommendedConfigLocationHandler>()
+                    .WithHandler<BicepSnapshotCommandHandler>()
                     .WithHandler<BicepDecompileCommandHandler>()
                     .WithHandler<BicepDecompileSaveCommandHandler>()
                     .WithHandler<BicepDecompileForPasteCommandHandler>()
@@ -101,12 +102,13 @@ namespace Bicep.LanguageServer
                     .WithHandler<LocalDeployHandler>()
                     .WithHandler<BicepForceModulesRestoreCommandHandler>()
                     .WithHandler<BicepGenerateParamsCommandHandler>()
-                    .WithHandler<VisualGraphUpdateHandler>()
+                    .WithHandler<VisualGraphHandler>()
                     .WithHandler<VisualGraphLayoutHandler>()
                     .WithHandler<VisualGraphNodeSourceHandler>()
-                    .WithHandler<VisualResourceTypeNamespacesHandler>()
                     .WithHandler<VisualResourceTypesHandler>()
-                    .WithHandler<PrepareVisualResourceHandler>()
+                    .WithHandler<VisualResourceTypeVersionsHandler>()
+                    .WithHandler<PrepareVisualResourceCreationHandler>()
+                    .WithHandler<PrepareVisualResourceReplayHandler>()
                     .WithServices(services => services.AddServerDependencies(bicepLangServerOptions));
 
                 onOptionsFunc(options);

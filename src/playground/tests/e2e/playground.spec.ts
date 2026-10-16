@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { gunzipSync } from "node:zlib";
+import { type Request } from "@playwright/test";
 import {
   createPlayground,
   expect,
@@ -248,7 +250,7 @@ test.describe("sharing", () => {
     await page.route(
       "https://dc.services.visualstudio.com/**",
       async (route) => {
-        telemetryPayloads.push(route.request().postData() ?? "");
+        telemetryPayloads.push(readTelemetryPayload(route.request()));
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -495,6 +497,39 @@ test.describe("editing", () => {
       );
   });
 
+  test("accepts empty entrypoint contents after decompilation", async ({
+    page,
+    playground,
+  }) => {
+    await playground.replaceEditorText(
+      playground.bicepEditor,
+      "param replacedContent string",
+    );
+    await expect
+      .poll(() => playground.readEditorText(playground.bicepEditor))
+      .toContain("param replacedContent string");
+
+    await page.getByLabel("ARM template JSON file").setInputFiles({
+      name: "empty.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        JSON.stringify({
+          $schema:
+            "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          contentVersion: "1.0.0.0",
+          resources: [],
+        }),
+      ),
+    });
+
+    await expect
+      .poll(async () =>
+        (await playground.readEditorText(playground.bicepEditor)).trim(),
+      )
+      .toBe("");
+    await expect(playground.error).not.toBeVisible();
+  });
+
   test("preserves source when decompilation fails", async ({
     page,
     playground,
@@ -676,6 +711,21 @@ test.describe("native interface", () => {
     );
   });
 });
+
+// Application Insights can gzip payloads, depending on remote SDK configuration.
+// Decompress them so the assertions inspect the telemetry that was actually sent.
+function readTelemetryPayload(request: Request): string {
+  const body = request.postDataBuffer();
+  if (!body) {
+    return "";
+  }
+
+  const isGzip =
+    request.headers()["content-encoding"] === "gzip" ||
+    (body[0] === 0x1f && body[1] === 0x8b);
+
+  return (isGzip ? gunzipSync(body) : body).toString("utf-8");
+}
 
 function parseTelemetryPayload(payload: string): unknown[] {
   const parsed = JSON.parse(payload) as unknown;

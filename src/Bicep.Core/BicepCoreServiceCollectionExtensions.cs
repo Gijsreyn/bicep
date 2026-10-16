@@ -66,10 +66,12 @@ public static class BicepCoreServiceCollectionExtensions
         services.TryAddSingleton<IFileSystem, LocalFileSystem>();
         services.TryAddSingleton<IFileExplorer, FileSystemFileExplorer>();
         services.TryAddSingleton<IAuxiliaryFileCache, AuxiliaryFileCache>();
+        services.TryAddSingleton<ExplicitConfigurationContext>();
         services.TryAddSingleton<BicepConfigurationManager>();
         services.TryAddSingleton<IBicepConfigurationManager>(sp => sp.GetRequiredService<BicepConfigurationManager>());
         services.TryAddSingleton<IBicepAnalyzer, LinterAnalyzer>();
         services.TryAddSingleton<IFeatureProviderFactory, FeatureProviderFactory>();
+        services.TryAddSingleton(CompilerVersionCheckOptions.Default);
         services.TryAddSingleton<ILinterRulesProvider, LinterRulesProvider>();
         services.TryAddSingleton<ISourceFileFactory, SourceFileFactory>();
         services.TryAddSingleton<IBicepDocumentationGenerator, BicepDocumentationGenerator>();

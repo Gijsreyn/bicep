@@ -6,7 +6,7 @@ using Bicep.Core.Analyzers.Interfaces;
 using Bicep.Core.Analyzers.Linter;
 using Bicep.Core.AzureApi;
 using Bicep.Core.Configuration;
-using Bicep.Core.Features;
+using Bicep.Core.Diagnostics;
 using Bicep.Core.Registry;
 using Bicep.Core.Registry.Catalog.Implementation;
 using Bicep.Core.Semantics.Namespaces;
@@ -43,6 +43,7 @@ public static class IServiceCollectionExtensions
         BicepLangServerOptions bicepLangServerOptions
     ) => services
         .AddBicepCore()
+        .AddSingleton(new CompilerVersionCheckOptions(ConstraintViolationLevel: DiagnosticLevel.Warning))
         .AddBicepDecompiler()
         .AddBicepLocalDeploy()
         .AddSingleton<IActiveSourceFileSet, ActiveSourceFileSet>()
@@ -63,7 +64,8 @@ public static class IServiceCollectionExtensions
         .AddSingleton<ISettingsProvider, SettingsProvider>()
         .AddSingleton<IAzureContainerRegistriesProvider, AzureContainerRegistriesProvider>()
         .AddSingleton<IVisualGraphLayoutEngine, MsaglVisualGraphLayoutEngine>()
-        .AddSingleton<IVisualResourceCreationService, VisualResourceCreationService>()
+        .AddSingleton<IVisualResourceTypeCatalogService, VisualResourceTypeCatalogService>()
+            .AddSingleton<IVisualResourceEditingService, VisualResourceEditingService>()
         .AddSingleton(bicepLangServerOptions)
         .AddSingleton<DocumentSelectorFactory>();
 }
